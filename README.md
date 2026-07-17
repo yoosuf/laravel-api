@@ -189,6 +189,15 @@ Public API surface is defined in `docs/SEMVER_POLICY.md`.
 - Changelog: `CHANGELOG.md`
 - Upgrade notes: `UPGRADE.md`
 
+## Open source project documents
+
+- License: `LICENSE`
+- Contributing: `CONTRIBUTING.md`
+- Code of Conduct: `CODE_OF_CONDUCT.md`
+- Security Policy: `SECURITY.md`
+- Support Guide: `SUPPORT.md`
+- Detailed contributor workflow: `docs/CONTRIBUTING_GUIDELINES.md`
+
 ## Documentation map
 
 - Architecture: `docs/ARCHITECTURE.md`
