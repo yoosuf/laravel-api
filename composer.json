@@ -1,0 +1,76 @@
+{
+  "name": "yoosuf/laravel-api",
+  "description": "High-performance Laravel API toolkit with OpenAPI 3 generation, interactive docs UI, and consistent response helpers.",
+  "type": "library",
+  "license": "MIT",
+  "homepage": "https://github.com/yoosuf/laravel-api",
+  "authors": [
+    {
+      "name": "Yoosuf"
+    }
+  ],
+  "support": {
+    "issues": "https://github.com/yoosuf/laravel-api/issues",
+    "source": "https://github.com/yoosuf/laravel-api"
+  },
+  "keywords": [
+    "laravel",
+    "api",
+    "openapi",
+    "swagger",
+    "documentation",
+    "rest-api",
+    "redoc",
+    "api-docs",
+    "php",
+    "laravel-package"
+  ],
+  "require": {
+    "php": "^8.1",
+    "illuminate/support": "^10.0|^11.0|^12.0"
+  },
+  "require-dev": {
+    "laravel/pint": "^1.13",
+    "orchestra/testbench": "^8.0",
+    "phpstan/phpstan": "^1.11",
+    "phpunit/phpunit": "^10.1"
+  },
+  "autoload": {
+    "psr-4": {
+      "Yoosuf\\LaravelApi\\": "src/"
+    },
+    "files": [
+      "src/helpers.php"
+    ]
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "Yoosuf\\LaravelApi\\Tests\\": "tests/"
+    }
+  },
+  "scripts": {
+    "test": "vendor/bin/phpunit -c phpunit.xml",
+    "test:unit": "vendor/bin/phpunit -c phpunit.xml --testsuite Unit",
+    "test:integration": "vendor/bin/phpunit -c phpunit.xml --testsuite Integration",
+    "analyse": "vendor/bin/phpstan analyse --configuration=phpstan.neon --memory-limit=1G",
+    "lint": "vendor/bin/pint --test",
+    "release:check": [
+      "@test",
+      "@analyse",
+      "@lint"
+    ]
+  },
+  "extra": {
+    "laravel": {
+      "providers": [
+        "Yoosuf\\LaravelApi\\LaravelApiServiceProvider"
+      ],
+      "aliases": {
+        "ApiResponse": "Yoosuf\\LaravelApi\\Facades\\ApiResponse"
+        }
+    }
+  },
+  "minimum-stability": "stable",
+  "prefer-stable": true
+}
+
