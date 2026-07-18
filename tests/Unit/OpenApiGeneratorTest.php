@@ -89,4 +89,97 @@ class OpenApiGeneratorTest extends TestCase
         $this->assertSame($first, $second);
         $this->assertArrayHasKey('/users', $second['paths']);
     }
+
+    // -------------------------------------------------------------------------
+    // Tags inference
+    // -------------------------------------------------------------------------
+
+    public function test_tags_are_inferred_from_controller_name(): void
+    {
+        $spec = $this->app->make(OpenApiGenerator::class)->generate('/api');
+
+        // TestApiController → tag 'test-api'
+        $this->assertContains('test-api', $spec['paths']['/users']['get']['tags']);
+        $this->assertContains('test-api', $spec['paths']['/users']['post']['tags']);
+    }
+
+    // -------------------------------------------------------------------------
+    // Standard error response schemas in components
+    // -------------------------------------------------------------------------
+
+    public function test_standard_error_schemas_are_present_in_components(): void
+    {
+        $spec = $this->app->make(OpenApiGenerator::class)->generate('/api');
+
+        $this->assertArrayHasKey('components', $spec);
+        $this->assertArrayHasKey('schemas', $spec['components']);
+        $this->assertArrayHasKey('ErrorEnvelope', $spec['components']['schemas']);
+        $this->assertArrayHasKey('StructuredError', $spec['components']['schemas']);
+    }
+
+    public function test_standard_response_references_are_present_in_components(): void
+    {
+        $spec = $this->app->make(OpenApiGenerator::class)->generate('/api');
+
+        $responses = $spec['components']['responses'];
+        $this->assertArrayHasKey('NotFound', $responses);
+        $this->assertArrayHasKey('ValidationError', $responses);
+        $this->assertArrayHasKey('TooManyRequests', $responses);
+        $this->assertArrayHasKey('ServerError', $responses);
+    }
+
+    public function test_post_operation_references_422_response(): void
+    {
+        $spec = $this->app->make(OpenApiGenerator::class)->generate('/api');
+
+        $postResponses = $spec['paths']['/users']['post']['responses'];
+        $this->assertArrayHasKey('422', $postResponses);
+    }
+
+    public function test_all_operations_reference_500_and_429_responses(): void
+    {
+        $spec = $this->app->make(OpenApiGenerator::class)->generate('/api');
+
+        foreach ($spec['paths'] as $path => $methods) {
+            foreach ($methods as $method => $operation) {
+                $this->assertArrayHasKey('500', $operation['responses'], "Missing 500 on {$method} {$path}");
+                $this->assertArrayHasKey('429', $operation['responses'], "Missing 429 on {$method} {$path}");
+            }
+        }
+    }
+
+    public function test_path_with_params_references_404_response(): void
+    {
+        $spec = $this->app->make(OpenApiGenerator::class)->generate('/api');
+
+        $getShowResponses = $spec['paths']['/users/{id}']['get']['responses'];
+        $this->assertArrayHasKey('404', $getShowResponses);
+    }
+
+    // -------------------------------------------------------------------------
+    // Auth middleware → security schemes
+    // -------------------------------------------------------------------------
+
+    public function test_auth_middleware_generates_bearer_security_scheme(): void
+    {
+        Route::middleware(['api', 'auth:sanctum'])->get('/api/protected', fn () => null)->name('protected.index');
+
+        $spec = $this->app->make(OpenApiGenerator::class)->generate('/api');
+
+        $this->assertArrayHasKey('securitySchemes', $spec['components']);
+        $this->assertArrayHasKey('bearerAuth', $spec['components']['securitySchemes']);
+        $this->assertSame('http', $spec['components']['securitySchemes']['bearerAuth']['type']);
+    }
+
+    public function test_auth_gated_operation_includes_security_and_401_403(): void
+    {
+        Route::middleware(['api', 'auth:sanctum'])->get('/api/protected', fn () => null)->name('protected.show');
+
+        $spec = $this->app->make(OpenApiGenerator::class)->generate('/api');
+
+        $op = $spec['paths']['/protected']['get'];
+        $this->assertArrayHasKey('security', $op);
+        $this->assertArrayHasKey('401', $op['responses']);
+        $this->assertArrayHasKey('403', $op['responses']);
+    }
 }

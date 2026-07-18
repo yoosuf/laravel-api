@@ -56,6 +56,7 @@ class OpenApiGenerator
     {
         $this->componentsRegistry->reset();
         $this->componentsRegistry->addSchemas((array) config('laravel-api.openapi.components.schemas', []));
+        $this->componentsRegistry->addSchemas($this->standardErrorSchemas());
 
         [$providerSchemas, $providerOverrides] = $this->loadProviders();
         $this->componentsRegistry->addSchemas($providerSchemas);
@@ -80,6 +81,8 @@ class OpenApiGenerator
 
         $routeCollection = $this->router->getRoutes();
         $routes = method_exists($routeCollection, 'getRoutes') ? $routeCollection->getRoutes() : [];
+
+        $usesAuth = false;
 
         foreach ($routes as $route) {
             if (! $route instanceof Route) {
@@ -106,9 +109,24 @@ class OpenApiGenerator
             foreach ($operations as $method => $operation) {
                 $spec['paths'][$path][$method] = $operation;
             }
+
+            if ($this->routeUsesAuthMiddleware($route)) {
+                $usesAuth = true;
+            }
         }
 
         $components = $this->componentsRegistry->toOpenApiComponents();
+
+        // Add bearer security scheme when at least one route is auth-gated.
+        if ($usesAuth) {
+            $components['securitySchemes'] = [
+                'bearerAuth' => [
+                    'type' => 'http',
+                    'scheme' => 'bearer',
+                    'bearerFormat' => 'token',
+                ],
+            ];
+        }
 
         if ($components !== []) {
             $spec['components'] = $components;
@@ -159,6 +177,9 @@ class OpenApiGenerator
         $methods = array_values(array_filter($route->methods(), static fn (string $m): bool => ! in_array($m, ['HEAD', 'OPTIONS'], true)));
         $actionName = $route->getActionName();
         $summary = $this->summaryFromAction($actionName);
+        $tags = $this->inferTagsFromAction($actionName);
+        $routeUsesAuth = $this->routeUsesAuthMiddleware($route);
+        $hasPathParams = $route->parameterNames() !== [];
 
         foreach ($methods as $method) {
             $httpMethod = strtolower($method);
@@ -167,11 +188,30 @@ class OpenApiGenerator
                 'summary' => $summary,
                 'operationId' => $this->operationId($httpMethod, $route),
                 'responses' => [
-                    '200' => [
-                        'description' => 'Successful response',
-                    ],
+                    '200' => ['description' => 'Successful response'],
                 ],
             ];
+
+            if ($tags !== []) {
+                $operations[$httpMethod]['tags'] = $tags;
+            }
+
+            if ($routeUsesAuth) {
+                $operations[$httpMethod]['security'] = [['bearerAuth' => []]];
+                $operations[$httpMethod]['responses']['401'] = ['$ref' => '#/components/responses/Unauthenticated'];
+                $operations[$httpMethod]['responses']['403'] = ['$ref' => '#/components/responses/Forbidden'];
+            }
+
+            if (in_array($httpMethod, ['post', 'put', 'patch'], true)) {
+                $operations[$httpMethod]['responses']['422'] = ['$ref' => '#/components/responses/ValidationError'];
+            }
+
+            if ($hasPathParams) {
+                $operations[$httpMethod]['responses']['404'] = ['$ref' => '#/components/responses/NotFound'];
+            }
+
+            $operations[$httpMethod]['responses']['500'] = ['$ref' => '#/components/responses/ServerError'];
+            $operations[$httpMethod]['responses']['429'] = ['$ref' => '#/components/responses/TooManyRequests'];
 
             $parameters = $this->extractPathParameters($route);
 
@@ -488,6 +528,87 @@ class OpenApiGenerator
         $method = $parts[1] ?? $actionName;
 
         return ucfirst(trim((string) preg_replace('/(?<!^)[A-Z]/', ' $0', $method)));
+    }
+
+    /**
+     * Infer OpenAPI tags from the controller class name.
+     *
+     * OrderController → [orders], UserProfileController → [user-profiles]
+     *
+     * @return array<int, string>
+     */
+    private function inferTagsFromAction(string $actionName): array
+    {
+        if ($actionName === 'Closure' || $actionName === '' || ! str_contains($actionName, '@')) {
+            return [];
+        }
+
+        [$class] = explode('@', $actionName, 2);
+        $shortName = class_basename($class);
+        $tag = (string) preg_replace('/Controller$/', '', $shortName);
+
+        if ($tag === '') {
+            return [];
+        }
+
+        // CamelCase → kebab-case, e.g. UserProfile → user-profile
+        $tag = strtolower((string) preg_replace('/(?<!^)[A-Z]/', '-$0', $tag));
+
+        return [$tag];
+    }
+
+    /**
+     * Returns true when the route carries any auth-related middleware.
+     */
+    private function routeUsesAuthMiddleware(Route $route): bool
+    {
+        $authMiddleware = ['auth', 'auth:api', 'auth:sanctum', 'auth:passport'];
+
+        foreach ($route->gatherMiddleware() as $m) {
+            $name = is_string($m) ? explode(':', $m)[0] : '';
+
+            if (in_array($name, $authMiddleware, true)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Standard reusable response schema definitions added to every generated spec.
+     *
+     * @return array<string, array<string, mixed>>
+     */
+    private function standardErrorSchemas(): array
+    {
+        return [
+            'ErrorEnvelope' => [
+                'type' => 'object',
+                'properties' => [
+                    'ok' => ['type' => 'boolean', 'example' => false],
+                    'type' => ['type' => 'string',  'example' => 'error'],
+                    'message' => ['type' => 'string'],
+                    'data' => ['nullable' => true],
+                    'errors' => ['type' => 'object', 'additionalProperties' => true],
+                ],
+            ],
+            'StructuredError' => [
+                'type' => 'object',
+                'properties' => [
+                    'error' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'code' => ['type' => 'string'],
+                            'message' => ['type' => 'string'],
+                            'target' => ['type' => 'string', 'nullable' => true],
+                            'details' => ['type' => 'array',  'items' => ['type' => 'object']],
+                            'innererror' => ['type' => 'object',  'nullable' => true, 'additionalProperties' => true],
+                        ],
+                    ],
+                ],
+            ],
+        ];
     }
 
     private function operationId(string $method, Route $route): string

@@ -84,6 +84,10 @@ return [
     ],
 
     'response' => [
+        // Set to 'structured' to emit RFC-compliant { "error": { "code", "message", "target", "details", "innererror" } }
+        // for all failed/error responses. Set to 'envelope' to keep the default envelope format.
+        'error_format' => env('LARAVEL_API_ERROR_FORMAT', 'envelope'),
+
         'defaults' => [
             'success_message' => 'Success',
             'failed_message' => 'Request failed',
@@ -97,5 +101,59 @@ return [
             'meta_key' => 'meta',
             'errors_key' => 'errors',
         ],
+        // Keys used by paginated() responses (OData-lite conventions).
+        'pagination' => [
+            'value_key' => env('LARAVEL_API_PAGINATION_VALUE_KEY', 'value'),
+            'next_link_key' => env('LARAVEL_API_PAGINATION_NEXT_LINK_KEY', '@nextLink'),
+            'prev_link_key' => env('LARAVEL_API_PAGINATION_PREV_LINK_KEY', '@prevLink'),
+            'count_key' => env('LARAVEL_API_PAGINATION_COUNT_KEY', '@count'),
+            // Also set an RFC 5988 Link header on paginated responses.
+            'link_header' => env('LARAVEL_API_PAGINATION_LINK_HEADER', true),
+        ],
+    ],
+
+    // -------------------------------------------------------------------------
+    // Exception rendering
+    // -------------------------------------------------------------------------
+    'exceptions' => [
+        // Set to true to auto-register ApiExceptionRenderer during boot so that
+        // authentication, validation, model-not-found, and HTTP exceptions are
+        // all rendered as JSON API responses automatically.
+        'auto_render' => env('LARAVEL_API_EXCEPTIONS_AUTO_RENDER', false),
+    ],
+
+    // -------------------------------------------------------------------------
+    // Request ID  (RFC 7240 / correlation headers)
+    // -------------------------------------------------------------------------
+    'request_id' => [
+        'enabled' => env('LARAVEL_API_REQUEST_ID_ENABLED', true),
+        // Header name surfaced on the response.
+        'header' => env('LARAVEL_API_REQUEST_ID_HEADER', 'X-Request-ID'),
+        // Alias header written alongside the primary header.
+        'correlation_header' => env('LARAVEL_API_CORRELATION_HEADER', 'X-Correlation-ID'),
+    ],
+
+    // -------------------------------------------------------------------------
+    // API versioning
+    // -------------------------------------------------------------------------
+    'versioning' => [
+        'enabled' => env('LARAVEL_API_VERSIONING_ENABLED', false),
+        // Query parameter clients may use: ?api-version=1.0
+        'query_param' => env('LARAVEL_API_VERSION_QUERY_PARAM', 'api-version'),
+        // Alternative request header: Api-Version: 1.0
+        'header' => env('LARAVEL_API_VERSION_HEADER', 'Api-Version'),
+        // The version reported in generated OpenAPI info.version when versioning is active.
+        'current' => env('LARAVEL_API_VERSION_CURRENT', '1.0'),
+        // Whitelist of accepted version strings. Leave empty to accept any value.
+        'supported' => [],
+    ],
+
+    // -------------------------------------------------------------------------
+    // Health check endpoint
+    // -------------------------------------------------------------------------
+    'health' => [
+        'enabled' => env('LARAVEL_API_HEALTH_ENABLED', true),
+        'route' => env('LARAVEL_API_HEALTH_ROUTE', '_health'),
+        'middleware' => [],
     ],
 ];

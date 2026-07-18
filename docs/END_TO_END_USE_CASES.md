@@ -1,6 +1,351 @@
 # End-to-End Use Cases
 
-This document shows concrete, release-ready ways to use `yoosuf/laravel-api` in a Laravel application. These are full flows, not placeholders.
+Concrete, release-ready usage patterns for `yoosuf/laravel-api`.
+
+---
+
+## Use case 1: Full API setup with middleware, exception rendering, and response helpers
+
+**Goal:** bootstrap a new Laravel API with consistent responses, automatic exception handling, and request tracing.
+
+### 1 — Install and publish
+
+```bash
+composer require yoosuf/laravel-api:*
+php artisan vendor:publish --tag=laravel-api-config
+```
+
+### 2 — Register middleware in `app/Http/Kernel.php`
+
+```php
+'api' => [
+    \Yoosuf\LaravelApi\Http\Middleware\ForceJsonMiddleware::class,
+    \Yoosuf\LaravelApi\Http\Middleware\RequestIdMiddleware::class,
+    \Yoosuf\LaravelApi\Http\Middleware\SecurityHeadersMiddleware::class,
+    'throttle:api',
+    \Illuminate\Routing\Middleware\SubstituteBindings::class,
+],
+```
+
+### 3 — Enable exception rendering in `.env`
+
+```
+LARAVEL_API_EXCEPTIONS_AUTO_RENDER=true
+```
+
+This automatically converts `AuthenticationException`, `ValidationException`, `ModelNotFoundException`, and `HttpException` to consistent API responses.
+
+### 4 — Use `HasApiResponses` in a controller
+
+```php
+use Yoosuf\LaravelApi\Concerns\HasApiResponses;
+
+class OrderController extends Controller
+{
+    use HasApiResponses;
+
+    public function index(): JsonResponse
+    {
+        return $this->fromPaginator(Order::paginate(20));
+    }
+
+    public function store(StoreOrderRequest $request): JsonResponse
+    {
+        $order = Order::create($request->validated());
+        return $this->created($order, 'Order created', null, route('orders.show', $order));
+    }
+
+    public function show(Order $order): JsonResponse
+    {
+        $response = $this->success($order, 'Order fetched');
+        return $this->checkEtag($request, $this->withEtag($response));
+    }
+
+    public function destroy(Order $order): JsonResponse
+    {
+        $order->delete();
+        return $this->noContent();
+    }
+}
+```
+
+### Outcome
+
+Every response has a predictable envelope. Every error — including framework exceptions — follows the same shape. Every response carries `X-Request-ID` for tracing.
+
+---
+
+## Use case 2: Paginated collection responses
+
+**Goal:** return paginated lists with correct OData-lite body and pagination headers.
+
+```php
+// From a LengthAwarePaginator (standard)
+public function index(): JsonResponse
+{
+    return $this->fromPaginator(Order::paginate(20));
+}
+
+// From a CursorPaginator
+public function feed(): JsonResponse
+{
+    return $this->fromCursorPaginator(Post::cursorPaginate(10));
+}
+
+// Manual (custom items/total/links)
+public function search(Request $request): JsonResponse
+{
+    $results = Search::run($request->query('q'));
+    return $this->paginated(
+        $results->items(),
+        $results->total(),
+        $results->nextPageUrl(),
+        $results->previousPageUrl()
+    );
+}
+```
+
+**Response shape:**
+```json
+{
+  "value": [ { "id": 1 }, { "id": 2 } ],
+  "@count": 100,
+  "@nextLink": "https://api.example.com/orders?page=2"
+}
+```
+
+**Link header:**
+```
+Link: <https://api.example.com/orders?page=2>; rel="next"
+```
+
+---
+
+## Use case 3: Rate-limiting with full headers
+
+```php
+public function store(Request $request): JsonResponse
+{
+    if ($this->isRateLimited($request)) {
+        return $this->tooManyRequests(
+            'Too many orders placed',
+            null,
+            null,
+            60,    // Retry-After seconds
+            1000,  // X-RateLimit-Limit
+            0,     // X-RateLimit-Remaining
+            time() + 60 // X-RateLimit-Reset
+        );
+    }
+    // ...
+}
+```
+
+---
+
+## Use case 4: Structured error format for microservice / B2B APIs
+
+**Goal:** emit RFC-style errors that downstream services can parse without guessing field names.
+
+In `.env`:
+```
+LARAVEL_API_ERROR_FORMAT=structured
+```
+
+All errors now return:
+```json
+{
+  "error": {
+    "code": "UnprocessableEntity",
+    "message": "One or more fields failed validation.",
+    "details": [
+      { "code": "ValidationError", "message": "The email field is required.", "target": "email" }
+    ]
+  }
+}
+```
+
+Or use `structuredError()` explicitly for precise control:
+
+```php
+return $this->structuredError(
+    'InsufficientFunds',
+    'Account balance is below the required minimum.',
+    422,
+    'accountId',
+    [['code' => 'BalanceCheck', 'message' => 'Balance: 0. Required: 100.', 'target' => 'balance']]
+);
+```
+
+---
+
+## Use case 5: API versioning
+
+**Goal:** route clients to versioned surfaces and reject unknown versions.
+
+In `config/laravel-api.php`:
+```php
+'versioning' => [
+    'enabled'   => true,
+    'supported' => ['1.0', '2.0'],
+    'current'   => '2.0',
+],
+```
+
+Register middleware on the API routes:
+```php
+Route::middleware(['api', 'laravel-api.versioning'])->prefix('api')->group(function () {
+    // ...
+});
+```
+
+Clients using `?api-version=9.9` receive:
+```json
+{
+  "error": {
+    "code": "UnsupportedApiVersion",
+    "message": "The API version '9.9' is not supported. Supported versions: 1.0, 2.0.",
+    "target": "api-version"
+  }
+}
+```
+
+---
+
+## Use case 6: Deprecating a route version
+
+**Goal:** signal to clients that an endpoint will be removed, without breaking them immediately.
+
+```php
+Route::middleware(['laravel-api.deprecation:2025-01-01,2026-01-01,https://api.example.com/v2/orders'])
+    ->get('/api/v1/orders', [OrderV1Controller::class, 'index']);
+```
+
+Response headers:
+```
+Deprecation: Wed, 01 Jan 2025 00:00:00 GMT
+Sunset:      Thu, 01 Jan 2026 00:00:00 GMT
+Link:        <https://api.example.com/v2/orders>; rel="successor-version"
+```
+
+---
+
+## Use case 7: OpenAPI docs with auto-inferred tags and security
+
+**Goal:** generate a spec where operations are tagged by controller and auth-gated routes show the security requirement.
+
+```bash
+php artisan api:openapi --format=all --prefix=/api
+```
+
+The generated spec will contain:
+
+- `tags: [orders]` on `OrderController` routes (auto-inferred)
+- `security: [{ bearerAuth: [] }]` on routes with `auth:sanctum`
+- `401`, `403` responses on auth-gated operations
+- `422` responses on POST/PUT/PATCH
+- `404` on routes with path parameters
+- `429`, `500` on every operation
+
+Enable the Swagger UI:
+```php
+'docs_ui' => ['enabled' => true, 'driver' => 'swagger', 'route' => 'api-docs'],
+```
+
+```bash
+php artisan vendor:publish --tag=laravel-api-assets --force
+php artisan serve
+```
+
+Open `http://localhost:8000/api-docs`.
+
+---
+
+## Use case 8: ETags for HTTP caching
+
+**Goal:** enable conditional GET responses so clients skip re-downloading unchanged resources.
+
+```php
+public function show(Order $order): JsonResponse
+{
+    $response = $this->success($order);
+    $response = $this->withEtag($response);          // Adds ETag header
+    return $this->checkEtag($request, $response);    // Returns 304 if If-None-Match matches
+}
+```
+
+Client request:
+```
+GET /api/orders/1
+If-None-Match: W/"abc123"
+```
+
+Response when unchanged:
+```
+HTTP/1.1 304 Not Modified
+```
+
+---
+
+## Use case 9: Testing with ApiResponseAssertions
+
+**Goal:** write clean, readable API tests without raw array access.
+
+```php
+use Yoosuf\LaravelApi\Testing\ApiResponseAssertions;
+
+class OrderTest extends TestCase
+{
+    use ApiResponseAssertions;
+
+    public function test_list_is_paginated(): void
+    {
+        $this->assertApiPaginated($this->getJson('/api/orders'));
+    }
+
+    public function test_create_returns_201_with_location(): void
+    {
+        $response = $this->postJson('/api/orders', ['amount' => 100]);
+        $this->assertApiCreated($response);
+        $this->assertApiDataKey($response, 'id', 1);
+        $response->assertHeader('Location');
+    }
+
+    public function test_validation_errors_are_structured(): void
+    {
+        $response = $this->postJson('/api/orders', []);
+        $this->assertApiValidationError($response, 'amount');
+    }
+
+    public function test_request_id_is_present(): void
+    {
+        $this->assertApiHasRequestId($this->getJson('/api/orders'));
+    }
+}
+```
+
+---
+
+## Use case 10: Health check for orchestration
+
+**Goal:** expose a health endpoint for load balancers, Kubernetes liveness probes, and uptime monitors.
+
+Enabled by default. Check at:
+```
+GET /_health
+```
+
+Response:
+```json
+{ "status": "ok", "timestamp": "2026-07-18T08:00:00Z" }
+```
+
+Customise route or disable:
+```
+LARAVEL_API_HEALTH_ENABLED=true
+LARAVEL_API_HEALTH_ROUTE=health
+```
+
 
 ## Use case 1: Ship machine-readable and human-readable API docs for an existing API
 

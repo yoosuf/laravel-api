@@ -67,14 +67,46 @@ class ComponentsRegistry
      */
     public function toOpenApiComponents(): array
     {
-        if ($this->schemas === []) {
-            return [];
+        $components = [];
+
+        if ($this->schemas !== []) {
+            ksort($this->schemas);
+            $components['schemas'] = $this->schemas;
         }
 
-        ksort($this->schemas);
-
-        return [
-            'schemas' => $this->schemas,
+        // Standard reusable response definitions referenced by operations.
+        $components['responses'] = [
+            'Unauthenticated' => [
+                'description' => 'Authentication is required.',
+                'content' => ['application/json' => ['schema' => ['$ref' => '#/components/schemas/ErrorEnvelope']]],
+            ],
+            'Forbidden' => [
+                'description' => 'Insufficient permissions.',
+                'content' => ['application/json' => ['schema' => ['$ref' => '#/components/schemas/ErrorEnvelope']]],
+            ],
+            'NotFound' => [
+                'description' => 'Resource not found.',
+                'content' => ['application/json' => ['schema' => ['$ref' => '#/components/schemas/ErrorEnvelope']]],
+            ],
+            'ValidationError' => [
+                'description' => 'Validation failed.',
+                'content' => ['application/json' => ['schema' => ['$ref' => '#/components/schemas/ErrorEnvelope']]],
+            ],
+            'TooManyRequests' => [
+                'description' => 'Rate limit exceeded.',
+                'headers' => [
+                    'Retry-After' => ['schema' => ['type' => 'integer']],
+                    'X-RateLimit-Limit' => ['schema' => ['type' => 'integer']],
+                    'X-RateLimit-Reset' => ['schema' => ['type' => 'integer']],
+                ],
+                'content' => ['application/json' => ['schema' => ['$ref' => '#/components/schemas/ErrorEnvelope']]],
+            ],
+            'ServerError' => [
+                'description' => 'Internal server error.',
+                'content' => ['application/json' => ['schema' => ['$ref' => '#/components/schemas/ErrorEnvelope']]],
+            ],
         ];
+
+        return $components;
     }
 }
